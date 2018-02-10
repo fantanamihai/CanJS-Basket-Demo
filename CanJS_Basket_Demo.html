@@ -1,0 +1,289 @@
+<!--
+	For this demo I chose CanJS, a MVC framework. The reasons I did this are:
+		a) In this example I wanted the Model part, because it allows a smooth integration with the View e.g. automatic update of View when value change
+		b) the View permits all kinds of bindings with the Model (parent to child, child to parent, two way binding). In this example I needed the child-to-parent biding
+		c) The process of automatic update of the View when Model value changes is optimized with Virtual DOM
+
+	The idea: each time the user enters quantities for a basket item, the receipt is updated using the following rules:
+		- only items with quantity > 0 are shown on the receipt
+		- if the case, the item discount is shown on the receipt
+		- Total price is shown on the receipt
+-->
+<html>
+<head>
+    <title>CanJS Basket Demo</title>
+</head>
+<body>
+<!-- General framework setup (fonts, bootsrap style, jquery, canjs) -->
+	<link rel="stylesheet" type="text/css" href="http://fonts.googleapis.com/css?family=Play">
+	<link rel="stylesheet" href="http://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css"></link>
+    <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.11.0/jquery.min.js"></script>
+    <script src="http://canjs.com/release/latest/can.jquery.js"></script>
+    <script src="http://canjs.com/release/latest/can.map.define.js"></script>
+    <script src="http://canjs.com/release/latest/can.stache.js"></script>
+
+<!-- Model setup. -->
+<!--
+	Define a Product model and each basket item (fruit) to be a Product instance.
+	The basket is seen as a list (array) of all possible products (it is defined as a parameter to app)
+	Model definition is done through can.Map. Basically the Model is like a simple Object with attributes, but also with metadata (such as type, default value, actions when attribute is read = getter etc.)
+	Below you will find the following definitions of attributes:
+		- 'name' - Name of the basket item (Apple, Papaya etc.), with default value empty string
+		- 'image' - url of the item image
+		- 'quantity' - type number, default value 0
+		- 'discountDescription' - when the case, represents the label shown on the product tag and also in receipt discount
+		- 'discount' - if defined, it is a function which receives quantity as parameter and return the value of the discount
+		- 'price' - a number being the price for one item
+		- 'totalPrice' - a getter attribute that calculates the total price of the item quantity
+	For simplicity, I use global variables
+-->
+    <script type='text/javascript'>
+		Product = can.Map({
+			define: {
+				name: { value: '' },
+				image: { value: '' },
+				quantity: { type: 'number', value: 0 },
+				discountDescription: { value: '' },
+				discount: {
+					get: function (discountFn) {
+						return discountFn ? discountFn(this.attr('quantity')) : 0;
+					}
+				},
+				price: { type: 'number', value: 0 },
+				totalPrice: {
+					get: function () {
+						return this.attr('price') * this.attr('quantity');
+					}
+				}
+			}
+		});
+
+//	Basket is a list (array) of products. It has a "total" attribute, representing the sum of the all items' 'totalPrices'
+
+		Product.List = Product.List.extend({
+			define: {
+				total: {
+					get: function() {
+						var total = 0;
+						this.each(function(product) {
+							total += product.attr('totalPrice') - product.attr('discount');
+						});
+
+						return total;
+					}
+				}
+			}
+		});
+
+		Apple = new Product({
+			name: 'Apples',
+			price: 25,
+			image: 'http://findicons.com/files/icons/1187/pickin_time/128/apple.png'
+		});
+
+		Orange = new Product({
+			name: 'Oranges',
+			price: 30,
+			image: 'http://findicons.com/files/icons/343/fruits/128/orange.png'
+		});
+
+		Banana = new Product({
+			name: 'Bananas',
+			price: 15,
+			image: 'http://findicons.com/files/icons/343/fruits/128/banana.png'
+		});
+
+		Papaya = new Product({
+			name: 'Papayas',
+			price: 50,
+			discountDescription: '3 at price of 2',
+			discount: function (quantity) {
+				return Math.floor(quantity/3) * 50;
+			},
+			image: 'http://findicons.com/files/icons/343/fruits/128/papaya.png',
+		});
+    </script>
+
+	<style>
+		.well {
+			background: #ff8a12;
+			margin-bottom: 0;
+		}
+		.item-container {
+			font-family: 'Play', sans-serif;
+			font-variant: small-caps;
+		}
+		.item-container:last-child {
+			margin-bottom: 0;
+		}
+		.item-container img {
+			width: 100px;
+			height: 100px;
+			padding: 20px;
+		}
+		.item-container .panel-header {
+			font-size: 20px;
+			margin-bottom: 10px;
+		}
+		.item-container .item-description {
+			font-size: 12px;
+		}
+		.item-container input {
+			width: 80px !important;
+		}
+	</style>
+
+<!--
+    <products/> template. basket is the list (array) of all possible items.
+    For each item render name, discount description and quantity input
+-->
+	<script id="productTemplate" type="text/stache">
+		<div class="well form-horizontal">
+		{{#basket}}
+			<div class="item-container panel">
+				<div class="media">
+					<div class="media-left">
+						<img src="{{image}}">
+					</div>
+					<div class="media-body">
+						<div class="panel-header">
+							{{name}}
+							<div class="item-description text-muted"> {{discountDescription}} </div>
+						</div>
+						<div class="input-group">
+							<span class="input-group-addon"> Qty: </span>
+							<input id="fruit" class="form-control" type='number' min='0' step='1' {($value)}='quantity'/>
+						</div>
+					</div>
+				</div>
+			</div>
+		{{/basket}}
+		</div>
+	</script>
+
+	<style>
+		.receipt-table {
+			width: 100%;
+			font-family: 'Courier New';
+			font-size: 16px;
+			font-style: normal;
+			font-variant: small-caps
+		}
+
+		.receipt-table .bottom-line {
+			border-bottom-style: solid;
+			border-bottom-width: 1px;
+		}
+
+		.receipt-table tr.no-border td {
+			border-style:none
+		}
+	</style>
+<!--
+	The receipt template is a table with 3 columns, item name, quantity and price of the whole quantity. It uses the "twoDecimalsPrice" helper to render price with 2 decimals.
+-->
+	<script id="receiptTemplate" type="text/stache">
+		{{#if basket.total}}
+			<table class="table table-condensed receipt-table">
+				<thead>
+					<tr class="bottom-line">
+						<th>Item</th>
+						<th class="text-right">Qty</th>
+						<th class="text-right">Value</th>
+					</tr>
+				</thead>
+				<tbody>
+					{{#basket}}
+						{{#if quantity}}
+							<tr>
+								<td colspan="3"> {{name}} - {{price}} &#162;/pcs</td>
+							</tr>
+							<tr class="no-border">
+								<td width="50%">&nbsp;</td>
+								<td width="25%" class="text-right"> {{quantity}} </td>
+								<td width="25%" class="text-right"> {{twoDecimalsPrice totalPrice}} </td>
+							</tr>
+							{{#if discount}}
+								<tr class="no-border">
+									<td colspan="2"> Discount ({{discountDescription}}) </td>
+									<td class="text-right"> -{{twoDecimalsPrice discount}} </td>
+								</tr>
+							{{/if}}
+						{{/if}}
+					{{/basket}}
+					<tr class="bottom-line">
+						<td colspan="2"> Total </td>
+						<td class="text-right"> {{twoDecimalsPrice basket.total}} </td>
+					</tr>
+				</tbody>
+			</table>
+		{{else}}
+			<div class="alert alert-warning" role="alert"> No items in basket </div>
+		{{/if}}
+	</script>
+
+<!--
+	can.Component allows Views definitions (tags)
+	Each tag is defined by name, a template and a model
+	The template allows bindings with the tag's model.
+
+	Below are definitions of 2 custom tags:
+		- <products/> - will render the basket items and allows quantity input
+		- <receipt/> - will render the receipt as items are added. It has a helper that will be used in template to show prices with just 2 decimals and currency symbol
+-->
+
+    <script type="text/javascript">
+		can.Component.extend({
+			tag: 'products',
+			template: can.view('productTemplate'),
+			viewModel: {
+                basket: null
+            }
+		});
+        can.Component.extend({
+            tag: 'receipt',
+            template: can.view('receiptTemplate'),
+            viewModel: {
+                basket: null
+            },
+			helpers: {
+				twoDecimalsPrice: function(priceCompute) {
+					return Number(priceCompute()/100).toFixed(2) + '$';
+				}
+			}
+        });
+	</script>
+
+<!--
+	Main application template. Basket is the parameter passed to the template and is the list of all possible items
+-->
+	<script type='text/stache' id='app'>
+		<div class="container">
+			<div class="row">
+				<div class="col-md-4">
+					<div class="panel panel-info">
+						<div class="panel-heading">
+							<div class="panel-title"> Products </div>
+						</div>
+					</div>
+					<products {basket}='Basket'/>
+				</div>
+				<div class="col-md-6">
+					<div class="panel panel-info">
+						<div class="panel-heading">
+							<div class="panel-title"> Receipt </div>
+						</div>
+					</div>
+					<receipt {basket}='Basket' />
+				</div>
+			</div>
+		</div>
+    </script>
+
+	<script>
+        $("body").append(can.view("app",{
+			Basket: new Product.List([Apple, Orange, Banana, Papaya])
+		}));
+    </script>
+</body>
+</html>
